@@ -1,0 +1,7 @@
+{
+  "name": "The Silas Crowe Experience",
+  "description": "An immersive AI-powered encounter with Silas Crowe, an underground strategist who manages chaos with lethal precision.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
