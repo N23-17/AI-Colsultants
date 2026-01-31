@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, Modality } from "@google/genai";
-import { SILAS_SYSTEM_PROMPT, MODEL_NAME, IMAGE_MODEL, TTS_MODEL } from "../constants";
+import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
+import { SILAS_SYSTEM_PROMPT, CHAT_MODEL, IMAGE_MODEL, LIVE_MODEL } from "../constants";
 
 export class GeminiService {
   private ai: GoogleGenAI;
@@ -9,12 +9,12 @@ export class GeminiService {
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   }
 
-  async generateSilasResponse(message: string, history: { role: 'user' | 'model', parts: { text: string }[] }[]) {
+  async generateSilasResponse(message: string, history: any[]) {
     const chat = this.ai.chats.create({
-      model: MODEL_NAME,
+      model: CHAT_MODEL,
       config: {
         systemInstruction: SILAS_SYSTEM_PROMPT,
-        temperature: 0.7,
+        temperature: 0.8,
         topP: 0.95,
       }
     });
@@ -24,7 +24,7 @@ export class GeminiService {
   }
 
   async generateSilasPortrait() {
-    const prompt = "A hyper-realistic cinematic portrait of Silas Crowe, an elite underground strategist. He is in his 40s, wearing a bespoke obsidian-black charcoal suit, sharp features, calm yet dangerous eyes. Setting: A dimly lit luxury lounge with subtle smoke and amber lighting. Expensive aesthetic, noir atmosphere.";
+    const prompt = "A hyper-realistic cinematic portrait of Silas Crowe, elite underground strategist, mid-40s. He wears a bespoke obsidian charcoal coat. Sharp features, calm, dangerous amber-glinting eyes. Setting: A rainy, neon-blurred city night viewed from a shadowed, minimalist luxury balcony. Moody noir lighting, smoke-drifts, cinematic depth of field.";
     
     const response = await this.ai.models.generateContent({
       model: IMAGE_MODEL,
@@ -42,44 +42,54 @@ export class GeminiService {
     return null;
   }
 
-  async generateSilasSpeech(text: string): Promise<Uint8Array | null> {
-    try {
-      // Prompt for TTS needs to include stylistic cues
-      const ttsPrompt = `Speak low, slow, and with controlled authority: ${text}`;
-      
-      const response = await this.ai.models.generateContent({
-        model: TTS_MODEL,
-        contents: [{ parts: [{ text: ttsPrompt }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Fenrir' } // Fenrir is a deep, authoritative voice
-            }
+  connectLive(callbacks: {
+    onAudio: (base64: string) => void;
+    onInterrupted: () => void;
+    onTranscription: (text: string, isUser: boolean) => void;
+  }) {
+    return this.ai.live.connect({
+      model: LIVE_MODEL,
+      callbacks: {
+        onopen: () => console.log('Silas: Connection established.'),
+        onmessage: async (message: LiveServerMessage) => {
+          if (message.serverContent?.modelTurn?.parts[0]?.inlineData?.data) {
+            callbacks.onAudio(message.serverContent.modelTurn.parts[0].inlineData.data);
           }
-        }
-      });
-
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        return this.decodeBase64(base64Audio);
+          if (message.serverContent?.interrupted) {
+            callbacks.onInterrupted();
+          }
+          if (message.serverContent?.outputTranscription) {
+            callbacks.onTranscription(message.serverContent.outputTranscription.text, false);
+          }
+          if (message.serverContent?.inputTranscription) {
+            callbacks.onTranscription(message.serverContent.inputTranscription.text, true);
+          }
+        },
+        onerror: (e) => console.error('Silas: Connection error.', e),
+        onclose: () => console.log('Silas: Connection closed.')
+      },
+      config: {
+        systemInstruction: SILAS_SYSTEM_PROMPT + "\nSpeak with absolute authority and deliberate pace. Use the canon phrases.",
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } }
+        },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {}
       }
-      return null;
-    } catch (error) {
-      console.error("Speech generation failed", error);
-      return null;
-    }
+    });
   }
+}
 
-  private decodeBase64(base64: string): Uint8Array {
-    const binaryString = atob(base64);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes;
+// Utility functions for audio
+export function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
   }
+  return bytes;
 }
 
 export async function decodeAudioData(
@@ -99,4 +109,13 @@ export async function decodeAudioData(
     }
   }
   return buffer;
+}
+
+export function encode(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
